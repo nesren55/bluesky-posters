@@ -11,4 +11,4 @@ jobs:
     steps:
       - name: Trigger Account 6
     
-                run: curl -s " run: curl -s "https://workers.dev" || exit 0r" || exit 0
+                run: curl -s " run: curl -s "https://6newgirl.newgirl-j.workers.dev/api/cron-trigger" || exit 0r" || exit 0
