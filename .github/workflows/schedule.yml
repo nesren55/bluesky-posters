@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Account 6
-        run: curl -s "https//6newgirl.newgirl-jworkersdev/api/cron-trigge" || true
+        run: curl -s "https://6newgirl.newgirl-j.workers.dev/api/cron-trigger" || true
