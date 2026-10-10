@@ -1,13 +1,33 @@
 name: Trigger Cloudflare Workers
 
-on:
+'on':
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
   ping_workers:
     runs-on: ubuntu-latest
+    timeout-minutes: 2
     steps:
       - name: Trigger Account 6
-        run: curl -s "https://6newgirl.newgirl-j.workers.dev/api/cron-trigger" || exit 0
+        env:
+          WORKER_URL: "https://6newgirl.newgirl-j.workers.dev"
+        run: |
+          set +e
+          response=$(curl \
+            --location \
+            --silent \
+            --show-error \
+            --connect-timeout 15 \
+            --max-time 60 \
+            --retry 2 \
+            --retry-delay 3 \
+            --write-out "\nHTTP_STATUS:%{http_code}\n" \
+            "$WORKER_URL/api/cron-trigger" 2>&1)
+          curl_exit=$?
+          printf '%s\n' "$response"
+          echo "CURL_EXIT_CODE=$curl_exit"
+
+          # لا تسقط GitHub Actions لو تعذر الاتصال مؤقتًا؛ سيتم المحاولة في التشغيل المجدول التالي.
+          exit 0
