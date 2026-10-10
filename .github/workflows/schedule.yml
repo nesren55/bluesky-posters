@@ -1,0 +1,16 @@
+name: Trigger Cloudflare Workers
+
+on:
+  schedule:
+    # يمكنكِ تغيير الوقت من هنا (مثلاً كل ساعة)
+      - cron: '*/10 * * * *'
+  workflow_dispatch: # هذا الخيار يتيح لكِ تشغيل النشر يدوياً للتجربة
+
+jobs:
+  ping_workers:
+    runs-on: ubuntu-latest
+    steps:
+
+
+      - name: Trigger Account 6
+        run: curl -s "https://6newgirl.newgirl-j.workers.dev/
