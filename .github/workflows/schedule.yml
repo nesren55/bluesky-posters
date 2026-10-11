@@ -35,10 +35,10 @@ jobs:
 
           endpoint="${WORKER_URL%/}/api/cron-trigger"
           response_file="$(mktemp)"
-          trap 'rm -f "$response_file"' EXIT
+          status_file="$(mktemp)"
 
-          set +e
-          http_code="$(curl \
+          curl_exit=0
+          curl \
             --silent \
             --show-error \
             --location \
@@ -54,15 +54,17 @@ jobs:
             --retry-all-errors \
             --output "$response_file" \
             --write-out '%{http_code}' \
-            "$endpoint")"
-          curl_exit=$?
-          set -e
+            "$endpoint" > "$status_file" || curl_exit=$?
+
+          http_code="$(cat "$status_file" 2>/dev/null || true)"
 
           echo "Endpoint: ${endpoint}"
           echo "HTTP status: ${http_code:-unknown}"
           echo "Response:"
           cat "$response_file" || true
           echo
+
+          rm -f "$response_file" "$status_file"
 
           if (( curl_exit != 0 )); then
             echo "::error::The Worker trigger request failed (curl exit ${curl_exit})."
@@ -74,4 +76,4 @@ jobs:
             exit 1
           fi
 
-          echo "Worker trigger accepted successfully
+          echo "Worker trigger accepted successfully."
