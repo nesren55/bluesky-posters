@@ -1,76 +1,37 @@
-name: Trigger Cloudflare Workers
+name: Trigger Cloudflare Workers  
 
-'on':
-  schedule:
-    # التشغيل كل 10 دقائق
-    - cron: "*/10 * * * *"
-  workflow_dispatch:
+'on':  
+  schedule:  
+    # كل 5 دقايق — آمنة بس بعد ما الـ Worker يبقى غير متزامن  
+    - cron: "*/5 * * * *"  
+  workflow_dispatch:  
 
-permissions:
-  contents: read
+permissions:  
+  contents: read  
 
-concurrency:
-  group: trigger-cloudflare-workers
-  cancel-in-progress: false
+concurrency:  
+  # منع تداخل التشغيلات لنفس الـ worker  
+  group: trigger-cloudflare-workers  
+  cancel-in-progress: false  
 
-jobs:
-  ping_workers:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+jobs:  
+  ping_workers:  
+    runs-on: ubuntu-latest  
+    timeout-minutes: 5  
 
-    strategy:
-      fail-fast: false
-      max-parallel: 10
+    strategy:  
+      fail-fast: false  
+      max-parallel: 10  
 
-      matrix:
-        worker:
-          # Worker رقم 6
-          - name: worker-6
-            url: https://6newgirl.newgirl-j.workers.dev
+      matrix:  
+        worker:  
+          - name: worker-6  
+            url: https://6newgirl.newgirl-j.workers.dev  
+          # - name: worker-7  
+          #   url: https://worker-7.workers.dev  
 
-          # أضف Workers حقيقية هنا بإزالة علامة #
-          # - name: worker-7
-          #   url: https://رابط-worker-7.workers.dev
-
-          # - name: worker-8
-          #   url: https://رابط-worker-8.workers.dev
-
-          # - name: worker-9
-          #   url: https://رابط-worker-9.workers.dev
-
-    steps:
-      - name: Run ${{ matrix.worker.name }}
-        env:
-          WORKER_URL: ${{ matrix.worker.url }}
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-
-        run: |
-          set +e
-
-          auth_args=()
-
-          if [ -n "${CRON_SECRET:-}" ]; then
-            auth_args=(-H "Authorization: Bearer ${CRON_SECRET}")
-          fi
-
-          response=$(curl \
-            --fail-with-body \
-            --location \
-            --silent \
-            --show-error \
-            --connect-timeout 20 \
-            --max-time 480 \
-            --retry 2 \
-            --retry-delay 10 \
-            --retry-all-errors \
-            "${auth_args[@]}" \
-            --write-out "\nHTTP_STATUS:%{http_code}\n" \
-            "${WORKER_URL}/api/cron-trigger" 2>&1)
-
-          curl_exit=$?
-
-          printf '%s\n' "$response"
-          echo "WORKER=${WORKER_URL}"
-          echo "CURL_EXIT_CODE=$curl_exit"
-
-          exit "$curl_exit"
+    steps:  
+      - name: Run ${{ matrix.worker.name }}  
+        env:  
+          WORKER_URL: ${{ matrix.worker.url }}  
+          CRON_SECRET: ${{ secrets.CRON
