@@ -1,77 +1,77 @@
-name: Trigger Cloudflare Workers
+name: Trigger Cloudflare Worker 6
 
 'on':
   schedule:
-    # التشغيل كل 10 دقائق
-    - cron: "*/3 * * * *"
+    # GitHub Actions uses UTC. This runs approximately every 10 minutes.
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Do not let two scheduled runs trigger the same Worker at once.
 concurrency:
-  group: trigger-cloudflare-workers
+  group: cloudflare-worker-6-cron
   cancel-in-progress: false
 
 jobs:
-  ping_workers:
+  trigger-worker:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    strategy:
-      fail-fast: false
-      max-parallel: 10
-
-      matrix:
-        worker:
-          # Worker رقم 6
-          - name: worker-6
-            url: https://6newgirl.newgirl-j.workers.dev
-
-          # أضف Workers حقيقية هنا بإزالة علامة #
-          # - name: worker-7
-          #   url: https://رابط-worker-7.workers.dev
-
-          # - name: worker-8
-          #   url: https://رابط-worker-8.workers.dev
-
-          # - name: worker-9
-          #   url: https://رابط-worker-9.workers.dev
-
     steps:
-      - name: Run ${{ matrix.worker.name }}
+      - name: Trigger Worker scheduler endpoint
+        shell: bash
         env:
-          WORKER_URL: ${{ matrix.worker.url }}
+          WORKER_URL: https://6newgirl.newgirl-j.workers.dev
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-
         run: |
-          set +e
+          set -Eeuo pipefail
 
-          auth_args=()
-
-          if [ -n "${CRON_SECRET:-}" ]; then
-            auth_args=(-H "Authorization: Bearer ${CRON_SECRET}")
+          if [[ -z "${CRON_SECRET:-}" ]]; then
+            echo "::error::GitHub secret CRON_SECRET is missing. Add the same value to GitHub Actions and Cloudflare Worker Variables/Secrets."
+            exit 1
           fi
 
-          response=$(curl \
-            --fail-with-body \
-            --location \
+          endpoint="${WORKER_URL%/}/api/cron-trigger"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+
+          set +e
+          http_code="$(curl \
             --silent \
             --show-error \
+            --location \
+            --fail-with-body \
+            --request POST \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Accept: application/json" \
             --connect-timeout 20 \
-            --max-time 480 \
-            --retry 2 \
-            --retry-delay 10 \
+            --max-time 90 \
+            --retry 4 \
+            --retry-delay 5 \
+            --retry-max-time 75 \
             --retry-all-errors \
-            "${auth_args[@]}" \
-            --write-out "\nHTTP_STATUS:%{http_code}\n" \
-            "${WORKER_URL}/api/cron-trigger" 2>&1)
-
+            --output "$response_file" \
+            --write-out '%{http_code}' \
+            "$endpoint")"
           curl_exit=$?
+          set -e
 
-          printf '%s\n' "$response"
-          echo "WORKER=${WORKER_URL}"
-          # update cron schedule
-          echo "CURL_EXIT_CODE=$curl_exit"
+          echo "Endpoint: ${endpoint}"
+          echo "HTTP status: ${http_code:-unknown}"
+          echo "Response:"
+          cat "$response_file" || true
+          echo
 
-          exit "$curl_exit"
+          if (( curl_exit != 0 )); then
+            echo "::error::The Worker trigger request failed (curl exit ${curl_exit})."
+            exit "$curl_exit"
+          fi
+
+          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::The Worker returned a non-success HTTP status: ${http_code}"
+            exit 1
+          fi
+
+          echo "Worker trigger accepted successfully
