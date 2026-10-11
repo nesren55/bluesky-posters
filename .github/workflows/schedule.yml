@@ -1,8 +1,8 @@
-name: Trigger Cloudflare Worker 6
+name: Trigger Cloudflare Workers
 
 'on':
   schedule:
-    # GitHub cron is UTC and may be delayed slightly; the Worker applies the Cairo schedule.
+    # التشغيل كل 10 دقائق
     - cron: "*/10 * * * *"
   workflow_dispatch:
 
@@ -10,21 +10,45 @@ permissions:
   contents: read
 
 concurrency:
-  group: trigger-cloudflare-worker-6
+  group: trigger-cloudflare-workers
   cancel-in-progress: false
 
 jobs:
-  ping_worker:
+  ping_workers:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+
+      matrix:
+        worker:
+          # Worker رقم 6
+          - name: worker-6
+            url: https://6newgirl.newgirl-j.workers.dev
+
+          # أضف Workers حقيقية هنا بإزالة علامة #
+          # - name: worker-7
+          #   url: https://رابط-worker-7.workers.dev
+
+          # - name: worker-8
+          #   url: https://رابط-worker-8.workers.dev
+
+          # - name: worker-9
+          #   url: https://رابط-worker-9.workers.dev
+
     steps:
-      - name: Run Worker scheduler and wait for result
+      - name: Run ${{ matrix.worker.name }}
         env:
-          WORKER_URL: "https://6newgirl.newgirl-j.workers.dev"
+          WORKER_URL: ${{ matrix.worker.url }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+
         run: |
           set +e
+
           auth_args=()
+
           if [ -n "${CRON_SECRET:-}" ]; then
             auth_args=(-H "Authorization: Bearer ${CRON_SECRET}")
           fi
@@ -42,8 +66,11 @@ jobs:
             "${auth_args[@]}" \
             --write-out "\nHTTP_STATUS:%{http_code}\n" \
             "${WORKER_URL}/api/cron-trigger" 2>&1)
+
           curl_exit=$?
 
           printf '%s\n' "$response"
+          echo "WORKER=${WORKER_URL}"
           echo "CURL_EXIT_CODE=$curl_exit"
+
           exit "$curl_exit"
