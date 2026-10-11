@@ -71,6 +71,7 @@ jobs:
 
           printf '%s\n' "$response"
           echo "WORKER=${WORKER_URL}"
+          # update cron schedule
           echo "CURL_EXIT_CODE=$curl_exit"
 
           exit "$curl_exit"
