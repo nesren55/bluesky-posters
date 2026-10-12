@@ -1,11 +1,10 @@
 name: Trigger Cloudflare Worker 6
 
 on:
-  # GitHub scheduled workflows run on UTC and can be delayed by GitHub.
-  # Every 5 minutes is the shortest practical interval for scheduled Actions.
+  # Runs automatically every 5 minutes (UTC). GitHub may delay scheduled runs.
   schedule:
-    - cron: "*/5 * * * *"
-  # Allows a manual test from the Actions tab.
+    - cron: '*/5 * * * *'
+  # Also allows a manual test from the Actions tab.
   workflow_dispatch:
 
 permissions:
@@ -41,8 +40,6 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -euo pipefail
-
-          # POST avoids relying on a browser-style GET. Do not print the secret.
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
 
@@ -68,16 +65,14 @@ jobs:
           echo
 
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Worker returned HTTP ${http_code}; check CRON_SECRET, the Worker deployment, and BSKY_DB binding."
+            echo "::error::Worker returned HTTP ${http_code}; check CRON_SECRET, Worker deployment, and BSKY_DB binding."
             exit 1
           fi
 
-          # Verify the Worker actually accepted the launch; HTTP 202 alone is not enough.
           python3 - "$response_file" <<'PY'
           import json, sys
-          path = sys.argv[1]
           try:
-              with open(path, encoding="utf-8") as f:
+              with open(sys.argv[1], encoding="utf-8") as f:
                   data = json.load(f)
           except Exception as exc:
               print(f"::error::Worker did not return valid JSON: {exc}")
@@ -86,7 +81,6 @@ jobs:
           if data.get("ok") is not True:
               print("::error::Worker rejected the trigger:", data)
               raise SystemExit(1)
-
           if data.get("accepted") is True:
               print("Worker accepted the scheduled run. Posting continues in the Worker background.")
               print("runId:", data.get("runId") or "(not supplied)")
