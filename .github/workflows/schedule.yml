@@ -1,13 +1,15 @@
 name: Trigger Cloudflare Worker 6
 
-'on':
+on:
   schedule:
-    - cron: '*/10 * * * *'
+    # GitHub Actions uses UTC. This runs approximately every 10 minutes.
+    - cron: '7-59/10 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Do not let two scheduled runs trigger the same Worker at once.
 concurrency:
   group: cloudflare-worker-6-cron
   cancel-in-progress: false
@@ -27,7 +29,7 @@ jobs:
           set -Eeuo pipefail
 
           if [[ -z "${CRON_SECRET:-}" ]]; then
-            echo "::error::GitHub secret CRON_SECRET is missing."
+            echo "::error::GitHub secret CRON_SECRET is missing. Add the same value to GitHub Actions and Cloudflare Worker Variables/Secrets."
             exit 1
           fi
 
