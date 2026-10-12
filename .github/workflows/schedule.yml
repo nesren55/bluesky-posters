@@ -1,79 +1,99 @@
 name: Trigger Cloudflare Worker 6
 
 on:
+  # GitHub scheduled workflows run on UTC and can be delayed by GitHub.
+  # Every 5 minutes is the shortest practical interval for scheduled Actions.
   schedule:
-    # GitHub Actions uses UTC. This runs approximately every 10 minutes.
-    - cron: '7-59/10 * * * *'
+    - cron: "*/5 * * * *"
+  # Allows a manual test from the Actions tab.
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Do not let two scheduled runs trigger the same Worker at once.
 concurrency:
-  group: cloudflare-worker-6-cron
+  group: trigger-cloudflare-worker-6
   cancel-in-progress: false
 
 jobs:
-  trigger-worker:
+  trigger:
+    name: Trigger worker-6
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
 
     steps:
-      - name: Trigger Worker scheduler endpoint
+      - name: Validate required secret
+        shell: bash
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CRON_SECRET:-}" ]]; then
+            echo "::error::Repository secret CRON_SECRET is missing or empty."
+            echo "Add Settings > Secrets and variables > Actions > New repository secret."
+            exit 1
+          fi
+
+      - name: Trigger Cloudflare Worker and verify response
         shell: bash
         env:
           WORKER_URL: https://6newgirl.newgirl-j.workers.dev
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          set -Eeuo pipefail
+          set -euo pipefail
 
-          if [[ -z "${CRON_SECRET:-}" ]]; then
-            echo "::error::GitHub secret CRON_SECRET is missing. Add the same value to GitHub Actions and Cloudflare Worker Variables/Secrets."
-            exit 1
-          fi
-
-          endpoint="${WORKER_URL%/}/api/cron-trigger"
+          # POST avoids relying on a browser-style GET. Do not print the secret.
           response_file="$(mktemp)"
-          status_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
 
-          curl_exit=0
-          curl \
-            --silent \
-            --show-error \
-            --location \
-            --fail-with-body \
-            --request POST \
-            --header "Authorization: Bearer ${CRON_SECRET}" \
-            --header "Accept: application/json" \
-            --connect-timeout 20 \
-            --max-time 90 \
-            --retry 4 \
-            --retry-delay 5 \
-            --retry-max-time 75 \
-            --retry-all-errors \
-            --output "$response_file" \
-            --write-out '%{http_code}' \
-            "$endpoint" > "$status_file" || curl_exit=$?
+          http_code="$(
+            curl --silent --show-error \
+              --request POST \
+              --connect-timeout 15 \
+              --max-time 40 \
+              --retry 2 \
+              --retry-delay 3 \
+              --retry-all-errors \
+              --output "$response_file" \
+              --write-out '%{http_code}' \
+              --header "Authorization: Bearer ${CRON_SECRET}" \
+              --header 'Accept: application/json' \
+              "${WORKER_URL%/}/api/cron-trigger"
+          )"
 
-          http_code="$(cat "$status_file" 2>/dev/null || true)"
-
-          echo "Endpoint: ${endpoint}"
-          echo "HTTP status: ${http_code:-unknown}"
-          echo "Response:"
-          cat "$response_file" || true
+          echo "Worker URL: ${WORKER_URL}"
+          echo "HTTP status: ${http_code}"
+          echo "Worker response:"
+          cat "$response_file"
           echo
 
-          rm -f "$response_file" "$status_file"
-
-          if (( curl_exit != 0 )); then
-            echo "::error::The Worker trigger request failed (curl exit ${curl_exit})."
-            exit "$curl_exit"
-          fi
-
           if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::The Worker returned a non-success HTTP status: ${http_code}"
+            echo "::error::Worker returned HTTP ${http_code}; check CRON_SECRET, the Worker deployment, and BSKY_DB binding."
             exit 1
           fi
 
-          echo "Worker trigger accepted successfully."
+          # Verify the Worker actually accepted the launch; HTTP 202 alone is not enough.
+          python3 - "$response_file" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          try:
+              with open(path, encoding="utf-8") as f:
+                  data = json.load(f)
+          except Exception as exc:
+              print(f"::error::Worker did not return valid JSON: {exc}")
+              raise SystemExit(1)
+
+          if data.get("ok") is not True:
+              print("::error::Worker rejected the trigger:", data)
+              raise SystemExit(1)
+
+          if data.get("accepted") is True:
+              print("Worker accepted the scheduled run. Posting continues in the Worker background.")
+              print("runId:", data.get("runId") or "(not supplied)")
+          elif data.get("skipped") is True:
+              print("Worker skipped this trigger because another run is already active.")
+              print("reason:", data.get("reason") or "unspecified")
+          else:
+              print("::error::Unexpected Worker response:", data)
+              raise SystemExit(1)
+          PY
