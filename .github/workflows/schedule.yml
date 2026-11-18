@@ -1,11 +1,11 @@
 name: Trigger Cloudflare Worker 6
 
 on:
-  # Runs automatically about every 5 minutes (UTC), offset from minute 0.
-  # GitHub may still delay scheduled runs under load.
+  # Runs automatically about every 5 minutes (UTC).
+  # Each run also sends short follow-up triggers so video processing
+  # does not depend on the dashboard being open.
   schedule:
-    - cron: "2-59/5 * * * *"
-  # Also allows a manual test from the Actions tab.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -19,7 +19,7 @@ jobs:
   trigger:
     name: Trigger worker-6
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 7
 
     steps:
       - name: Validate required secret
@@ -34,7 +34,7 @@ jobs:
             exit 1
           fi
 
-      - name: Trigger Cloudflare Worker and verify response
+      - name: Trigger Worker and follow pending video jobs
         shell: bash
         env:
           WORKER_URL: https://6newgirl.newgirl-j.workers.dev
@@ -44,33 +44,37 @@ jobs:
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
 
-          http_code="$(
-            curl --silent --show-error \
-              --request POST \
-              --connect-timeout 15 \
-              --max-time 40 \
-              --retry 2 \
-              --retry-delay 3 \
-              --retry-all-errors \
-              --output "$response_file" \
-              --write-out '%{http_code}' \
-              --header "Authorization: Bearer ${CRON_SECRET}" \
-              --header 'Accept: application/json' \
-              "${WORKER_URL%/}/api/cron-trigger"
-          )"
+          # One GitHub run performs several short polls. The first call may
+          # start the upload; later calls resume the Bluesky job by jobId.
+          for attempt in $(seq 1 20); do
+            http_code="$(
+              curl --silent --show-error \
+                --request POST \
+                --connect-timeout 15 \
+                --max-time 40 \
+                --retry 2 \
+                --retry-delay 3 \
+                --retry-all-errors \
+                --output "$response_file" \
+                --write-out '%{http_code}' \
+                --header "Authorization: Bearer ${CRON_SECRET}" \
+                --header 'Accept: application/json' \
+                "${WORKER_URL%/}/api/cron-trigger"
+            )"
 
-          echo "Worker URL: ${WORKER_URL}"
-          echo "HTTP status: ${http_code}"
-          echo "Worker response:"
-          cat "$response_file"
-          echo
+            echo "Attempt ${attempt}/20"
+            echo "Worker URL: ${WORKER_URL}"
+            echo "HTTP status: ${http_code}"
+            echo "Worker response:"
+            cat "$response_file"
+            echo
 
-          if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Worker returned HTTP ${http_code}; check CRON_SECRET, Worker deployment, and BSKY_DB binding."
-            exit 1
-          fi
+            if [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+              echo "::error::Worker returned HTTP ${http_code}; check the Worker deployment and BSKY_DB binding."
+              exit 1
+            fi
 
-          python3 - "$response_file" <<'PY'
+            python3 - "$response_file" <<'PY'
           import json, sys
           try:
               with open(sys.argv[1], encoding="utf-8") as f:
@@ -82,16 +86,19 @@ jobs:
           if data.get("ok") is not True:
               print("::error::Worker rejected the trigger:", data)
               raise SystemExit(1)
+
           if data.get("accepted") is True:
-              print("Worker accepted the scheduled run. Posting continues in the Worker background.")
-              print("runId:", data.get("runId") or "(not supplied)")
-              if "fallbackAccepted" in data:
-                  print("Fallback signals accepted:", data.get("fallbackAccepted") or 0)
-                  print("Fallback tasks added:", data.get("fallbackPendingAdded") or 0)
+              print("Worker accepted the trigger; pending video jobs will be checked again.")
           elif data.get("skipped") is True:
-              print("Worker skipped this trigger because another run is already active.")
+              print("Worker skipped this trigger because another run is active.")
               print("reason:", data.get("reason") or "unspecified")
           else:
-              print("::error::Unexpected Worker response:", data)
-              raise SystemExit(1)
+              print("Worker returned an unexpected success response:", data)
           PY
+
+            if (( attempt < 20 )); then
+              sleep 15
+            fi
+          done
+
+          echo "GitHub follow-up polling finished. Any remaining job will be picked up by the next scheduled run."
