@@ -19,7 +19,7 @@ jobs:
   trigger:
     name: Trigger worker-6
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 10
 
     steps:
       - name: Validate required secret
@@ -48,7 +48,7 @@ jobs:
             curl --silent --show-error \
               --request POST \
               --connect-timeout 15 \
-              --max-time 40 \
+              --max-time 300 \
               --retry 2 \
               --retry-delay 3 \
               --retry-all-errors \
@@ -82,9 +82,12 @@ jobs:
           if data.get("ok") is not True:
               print("::error::Worker rejected the trigger:", data)
               raise SystemExit(1)
-          if data.get("accepted") is True:
-              print("Worker accepted the scheduled run. Posting continues in the Worker background.")
-              print("runId:", data.get("runId") or "(not supplied)")
+          if data.get("completed") is True:
+              print("Worker completed the scheduled run. Posting finished in the Worker.")
+              print("published:", data.get("published", 0))
+          elif data.get("accepted") is True:
+              print("Worker accepted and completed the scheduled run.")
+              print("published:", data.get("published", 0))
           elif data.get("skipped") is True:
               print("Worker skipped this trigger because another run is already active.")
               print("reason:", data.get("reason") or "unspecified")
