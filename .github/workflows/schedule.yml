@@ -19,7 +19,7 @@ jobs:
   trigger:
     name: Trigger worker-6
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 20
 
     steps:
       - name: Validate required secret
@@ -51,7 +51,7 @@ jobs:
               curl --silent --show-error \
                 --request POST \
                 --connect-timeout 15 \
-                --max-time 40 \
+                --max-time 600 \
                 --retry 2 \
                 --retry-delay 3 \
                 --retry-all-errors \
